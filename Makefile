@@ -5,8 +5,16 @@ CXX	    = g++
 
 default: pso_floorplan
 
-pso_floorplan: main.o
-	$(CXX) $(CXX_FLAGS) main.o -o $@
+pso_floorplan: main.o util.o
+	$(CXX) $(CXX_FLAGS) -o $@ $^
 
-main.o: main.cpp
-	$(CXX) $(CXX_FLAGS) -c -o $@ $^
+main.o: main.cpp util.hpp
+	$(CXX) $(CXX_FLAGS) -c -o $@ $<
+
+util.o: util.cpp
+	$(CXX) $(CXX_FLAGS) -c -o $@ $<
+
+.PHONY: clean
+
+clean:
+	rm -f *.o *~ pso_floorplan
