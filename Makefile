@@ -1,6 +1,6 @@
 NVCC        = nvcc
 NVCC_FLAGS  = -I/usr/local/cuda/include -gencode=arch=compute_60,code=\"sm_60\" --relocatable-device-code true
-CXX_FLAGS   = -std=c++11 -Wall -Wextra -O2 -lpthread
+CXX_FLAGS   = -std=c++11 -Wall -Wextra -O3 -lpthread
 CXX	    = g++
 
 default: pso_floorplan

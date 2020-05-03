@@ -12,7 +12,7 @@
 
 #include "util.hpp"
 #include "main.hpp"
-constexpr int numParticles = 32;
+constexpr int numParticles = 64;
 int numThreads = std::thread::hardware_concurrency();
 int numPPerT = numParticles / numThreads;
 
@@ -146,16 +146,174 @@ int main(int argc, const char *argv[])
   gBestArea = lastArea[minParIdx];
   int minOffBegin = minParIdx*numModules;
   int minOffEnd = (minParIdx+1)*numModules;
+  
   std::copy(std::begin(GammaP)+minOffBegin, std::begin(GammaP)+minOffEnd, std::begin(gBestGammaP));
   std::copy(std::begin(GammaN)+minOffBegin, std::begin(GammaN)+minOffEnd, std::begin(gBestGammaN));
   std::copy(std::begin(wC)+minOffBegin, std::begin(wC)+minOffEnd, std::begin(gBestWidC));
   std::copy(std::begin(hC)+minOffBegin, std::begin(hC)+minOffEnd, std::begin(gBestHeiC));
 
   int counter = 0; // stop if for 10 consecutive cycle area is not improving
+  int cycle = 0;
+  
+  int cSwapLocal = int(0.4*numModules);
+  int cSwapGlobal = int(0.4*numModules);
+  int cSwapKeep = numModules - cSwapLocal - cSwapGlobal;
 
-  while (counter < 10) {
+  // global variable for switch operators
+  std::vector<int>
+    sAP(numModules*numParticles, 0),
+    sBP(numModules*numParticles, 0),
+    sAN(numModules*numParticles, 0),
+    sBN(numModules*numParticles, 0);
+  
+  while (counter < 100) {
+    threads = std::vector<std::thread>(numThreads);
+    for (auto tIdx=0; tIdx < numThreads; ++tIdx) {
+      threads.at(tIdx) = std::thread
+	([&, tIdx]{
+	   // initialization
+	   std::vector<int> particles(numPPerT);
+	   std::iota(std::begin(particles), std::end(particles), tIdx*numPPerT);
+	   for (const auto pIdx: particles) {
+	     int oBegin = pIdx * numModules;
+	     int oEnd = oBegin + numModules;
+  
+	     // copy first cSwapKeep Ops to the end of queue;
+	     std::copy(std::begin(sAP)+oBegin, std::begin(sAP)+oBegin+cSwapKeep, std::begin(sAP)+oEnd-cSwapKeep);
+	     std::copy(std::begin(sAN)+oBegin, std::begin(sAN)+oBegin+cSwapKeep, std::begin(sAN)+oEnd-cSwapKeep);
+	     std::copy(std::begin(sBP)+oBegin, std::begin(sBP)+oBegin+cSwapKeep, std::begin(sBP)+oEnd-cSwapKeep);
+	     std::copy(std::begin(sBN)+oBegin, std::begin(sBN)+oBegin+cSwapKeep, std::begin(sBN)+oEnd-cSwapKeep);
+  
+	     std::vector<int> SourceP(std::begin(GammaP)+oBegin, std::begin(GammaP)+oEnd);
+	     std::vector<int> SourceN(std::begin(GammaN)+oBegin, std::begin(GammaN)+oEnd);
+	     std::vector<int> TargetP(std::begin(lBestGammaP)+oBegin, std::begin(lBestGammaP)+oEnd);
+	     std::vector<int> TargetN(std::begin(lBestGammaN)+oBegin, std::begin(lBestGammaN)+oEnd);
+	     int offset = 0;
+	     // calculate swap for local
+	     for (auto i = 0; i < cSwapLocal; ++i) {
+	       int j = std::find(std::begin(SourceP)+i, std::end(SourceP), TargetP[i]) - std::begin(SourceP);
+	       sAP[oBegin+offset+i] = i;
+	       sBP[oBegin+offset+i] = j;
+	       int temp = SourceP[i];
+	       SourceP[i] = SourceP[j];
+	       SourceP[j] = temp;
+	       j = std::find(std::begin(SourceN)+i, std::end(SourceN), TargetN[i]) - std::begin(SourceN);
+	       sAN[oBegin+offset+i] = i;
+	       sBN[oBegin+offset+i] = j;
+	       temp = SourceN[i];
+	       SourceN[i] = SourceN[j];
+	       SourceN[j] = temp;
+	     }
+
+	     SourceP = std::vector<int>(std::begin(GammaP)+oBegin, std::begin(GammaP)+oEnd);
+	     SourceN = std::vector<int>(std::begin(GammaN)+oBegin, std::begin(GammaN)+oEnd);
+	     TargetP = std::vector<int>(gBestGammaP);
+	     TargetN = std::vector<int>(gBestGammaN);
+	     offset = cSwapLocal;
+	     // calculate swap for global
+	     for (auto i = 0; i < cSwapGlobal; ++i) {
+	       int j = std::find(std::begin(SourceP)+i, std::end(SourceP), TargetP[i]) - std::begin(SourceP);
+	       sAP[oBegin+offset+i] = i;
+	       sBP[oBegin+offset+i] = j;
+	       int temp = SourceP[i];
+	       SourceP[i] = SourceP[j];
+	       SourceP[j] = temp;
+	       j = std::find(std::begin(SourceN)+i, std::end(SourceN), TargetN[i]) - std::begin(SourceN);
+	       sAN[oBegin+offset+i] = i;
+	       sBN[oBegin+offset+i] = j;
+	       temp = SourceN[i];
+	       SourceN[i] = SourceN[j];
+	       SourceN[j] = temp;
+	     }
+  
+	     // swap Gamma PN
+	     for (auto i = 0; i < numModules; ++i) {
+	       int temp = GammaP[oBegin + sAP[oBegin+i]];
+	       GammaP[oBegin + sAP[oBegin+i]] = GammaP[oBegin + sBP[oBegin+i]];
+	       GammaP[oBegin + sBP[oBegin+i]] = temp;
+	       temp = GammaN[oBegin + sAN[oBegin+i]];
+	       GammaN[oBegin + sAN[oBegin+i]] = GammaN[oBegin + sBN[oBegin+i]];
+	       GammaN[oBegin + sBN[oBegin+i]] = temp;
+	     }
+
+	     // construct HCG and VCG
+  
+	     // assign order for each
+	     // note order can be in shared memory
+	     std::vector<int> OrderP(numModules), OrderN(numModules);
+	     int sizeMatrix = numModules * numModules;
+	     std::vector<int> HCG(sizeMatrix, 0), VCG(sizeMatrix, 0);
+	     for (auto i = 0; i < numModules; ++i) {
+	       OrderP.at(GammaP.at(i+oBegin)) = i;
+	       OrderN.at(GammaN.at(i+oBegin)) = i;
+	     }
+
+	     // note: in cuda HCG and VCG must be preallocated
+	     for (auto i = 0; i < numModules; ++i) {
+	       for (auto j = 0; j < numModules; ++j) {
+		 if (i != j) {
+		   if (OrderN.at(i) < OrderN.at(j)) {
+		     if (OrderP.at(i) < OrderP.at(j))  // left of
+		       HCG[i*numModules+j]=1;
+		     else // below
+		       VCG[i*numModules+j]=1;
+		   }
+		 }
+	       }
+	     }
+  
+	     // Toposort and get area
+	     // Note: flag can be in shared memory
+	     std::vector<Status> flags(numModules, None);
+	     int wChip = 0, hChip = 0;
+	     // toposort HCG
+	     for (auto i = 0; i < numModules; ++i) {
+	       wChip = std::max(wChip, widths.at(i)+visit(i, numModules, oBegin, HCG, widths, wC, flags));
+	     }
+	     std::fill(std::begin(flags), std::end(flags), None);
+	     for (auto i = 0; i < numModules; ++i) {
+	       hChip = std::max(hChip, heights.at(i)+visit(i, numModules, oBegin, VCG, heights, hC, flags));
+	     }
+	     
+	     // update local best
+	     lastArea[pIdx] = wChip*hChip;
+	     if (lBestArea[pIdx] > lastArea[pIdx]) {
+	       lBestArea[pIdx] = lastArea[pIdx];
+	       std::copy(std::begin(GammaP)+oBegin, std::begin(GammaP)+oEnd, std::begin(lBestGammaP)+oBegin);
+	       std::copy(std::begin(GammaN)+oBegin, std::begin(GammaN)+oEnd, std::begin(lBestGammaN)+oBegin);
+	     }
+	   }
+	 });
+    }
+    for (auto& t: threads) {
+      t.join();
+    }
+    // update global best
+    minParIdx = std::distance(std::begin(lastArea),
+				  std::min_element(std::begin(lastArea), std::end(lastArea)));
+    std::cout << "\t" << lastArea[minParIdx] << std::endl;
+    if (gBestArea > lastArea[minParIdx]) {
+      gBestArea = lastArea[minParIdx];
+      minOffBegin = minParIdx*numModules;
+      minOffEnd = (minParIdx+1)*numModules;
+  
+      std::copy(std::begin(GammaP)+minOffBegin, std::begin(GammaP)+minOffEnd, std::begin(gBestGammaP));
+      std::copy(std::begin(GammaN)+minOffBegin, std::begin(GammaN)+minOffEnd, std::begin(gBestGammaN));
+      std::copy(std::begin(wC)+minOffBegin, std::begin(wC)+minOffEnd, std::begin(gBestWidC));
+      std::copy(std::begin(hC)+minOffBegin, std::begin(hC)+minOffEnd, std::begin(gBestHeiC));
+    }
+    
+    /*
+    std::cout << GammaP << std::endl
+	      << gBestGammaP << std::endl
+	      << GammaN << std::endl
+	      << gBestGammaN << std::endl;
+    */
+    std::cout << gBestArea << std::endl;
     ++counter;
   }
+  
+
   
   std::cout << "Best Area:" << gBestArea << std::endl;
   // Timing
