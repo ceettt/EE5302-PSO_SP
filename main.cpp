@@ -9,10 +9,11 @@
 #include <thread>
 #include <chrono>
 #include <cassert>
+#include <cmath>
 
 #include "util.hpp"
 #include "main.hpp"
-constexpr int numParticles = 64;
+constexpr int numParticles = 48;
 int numThreads = std::thread::hardware_concurrency();
 int numPPerT = numParticles / numThreads;
 
@@ -64,6 +65,7 @@ int main(int argc, const char *argv[])
   std::vector<int> lastArea(numParticles);
   std::vector<int> lBestArea(numParticles);
   std::vector<std::thread> threads(numThreads);
+  std::vector<std::mt19937> gens(numThreads);
   int gBestArea = -1;
   std::vector<int> gBestWidC(numModules), gBestHeiC(numModules);
   // following should be done with every particle
@@ -74,13 +76,15 @@ int main(int argc, const char *argv[])
       ([&, tIdx]{
 	 // initialization
 	 std::random_device rd;
-	 std::mt19937 gen(rd());
-
+	 gens[tIdx] = std::mt19937(rd());
+	 
 	 std::vector<int> particles(numPPerT);
 	 std::iota(std::begin(particles), std::end(particles), tIdx*numPPerT);
 	 //std::cout << "Thread ID:" << tIdx
 	 //	   << "\tExecuting Particle " << particles
 	 //	   << std::endl;
+	 auto& gen = gens[tIdx];
+	 
 	 for (const auto pIdx: particles) {
 	   // shuffle initial sequential pair
 	   int oBegin = pIdx*numModules;
@@ -152,21 +156,14 @@ int main(int argc, const char *argv[])
   std::copy(std::begin(wC)+minOffBegin, std::begin(wC)+minOffEnd, std::begin(gBestWidC));
   std::copy(std::begin(hC)+minOffBegin, std::begin(hC)+minOffEnd, std::begin(gBestHeiC));
 
-  int counter = 0; // stop if for 10 consecutive cycle area is not improving
+  constexpr int Stop = 100;
+  int counter = 0; // stop if for Stop consecutive cycle area is not improving
   int cycle = 0;
   
-  int cSwapLocal = int(0.4*numModules);
-  int cSwapGlobal = int(0.4*numModules);
-  int cSwapKeep = numModules - cSwapLocal - cSwapGlobal;
-
-  // global variable for switch operators
-  std::vector<int>
-    sAP(numModules*numParticles, 0),
-    sBP(numModules*numParticles, 0),
-    sAN(numModules*numParticles, 0),
-    sBN(numModules*numParticles, 0);
+  float cSwap = std::max(0.8f, (1.0f/numModules)); // ensure one swap
+  int cSwapRandom = std::ceil(0.01*numModules);
   
-  while (counter < 100) {
+  while (counter < Stop) {
     threads = std::vector<std::thread>(numThreads);
     for (auto tIdx=0; tIdx < numThreads; ++tIdx) {
       threads.at(tIdx) = std::thread
@@ -174,66 +171,91 @@ int main(int argc, const char *argv[])
 	   // initialization
 	   std::vector<int> particles(numPPerT);
 	   std::iota(std::begin(particles), std::end(particles), tIdx*numPPerT);
+
+	   auto& gen = gens[tIdx];
 	   for (const auto pIdx: particles) {
 	     int oBegin = pIdx * numModules;
 	     int oEnd = oBegin + numModules;
-  
-	     // copy first cSwapKeep Ops to the end of queue;
-	     std::copy(std::begin(sAP)+oBegin, std::begin(sAP)+oBegin+cSwapKeep, std::begin(sAP)+oEnd-cSwapKeep);
-	     std::copy(std::begin(sAN)+oBegin, std::begin(sAN)+oBegin+cSwapKeep, std::begin(sAN)+oEnd-cSwapKeep);
-	     std::copy(std::begin(sBP)+oBegin, std::begin(sBP)+oBegin+cSwapKeep, std::begin(sBP)+oEnd-cSwapKeep);
-	     std::copy(std::begin(sBN)+oBegin, std::begin(sBN)+oBegin+cSwapKeep, std::begin(sBN)+oEnd-cSwapKeep);
-  
+	     std::uniform_real_distribution<float> dis(0,1);
+	     //std::cout << oBegin << std::endl;
+	     
 	     std::vector<int> SourceP(std::begin(GammaP)+oBegin, std::begin(GammaP)+oEnd);
 	     std::vector<int> SourceN(std::begin(GammaN)+oBegin, std::begin(GammaN)+oEnd);
 	     std::vector<int> TargetP(std::begin(lBestGammaP)+oBegin, std::begin(lBestGammaP)+oEnd);
 	     std::vector<int> TargetN(std::begin(lBestGammaN)+oBegin, std::begin(lBestGammaN)+oEnd);
-	     int offset = 0;
+	     int swapCount = 0;
+	     
 	     // calculate swap for local
-	     for (auto i = 0; i < cSwapLocal; ++i) {
+	     for (auto i = 0; i < numModules; ++i) {
 	       int j = std::find(std::begin(SourceP)+i, std::end(SourceP), TargetP[i]) - std::begin(SourceP);
-	       sAP[oBegin+offset+i] = i;
-	       sBP[oBegin+offset+i] = j;
 	       int temp = SourceP[i];
 	       SourceP[i] = SourceP[j];
 	       SourceP[j] = temp;
+	       if (dis(gen) < cSwap) { // swap gamma
+		 temp = GammaP[i+oBegin];
+		 GammaP[i+oBegin] = GammaP[j+oBegin];
+		 GammaP[j+oBegin] = temp;
+		 ++swapCount;
+	       }
 	       j = std::find(std::begin(SourceN)+i, std::end(SourceN), TargetN[i]) - std::begin(SourceN);
-	       sAN[oBegin+offset+i] = i;
-	       sBN[oBegin+offset+i] = j;
 	       temp = SourceN[i];
 	       SourceN[i] = SourceN[j];
 	       SourceN[j] = temp;
+	       if (dis(gen) < cSwap) { // swap gamma
+		 temp = GammaN[i+oBegin];
+		 GammaN[i+oBegin] = GammaN[j+oBegin];
+		 GammaN[j+oBegin] = temp;
+		 ++swapCount;
+	       }
 	     }
-
+	     //std::cout << swapCount << std::endl;
 	     SourceP = std::vector<int>(std::begin(GammaP)+oBegin, std::begin(GammaP)+oEnd);
 	     SourceN = std::vector<int>(std::begin(GammaN)+oBegin, std::begin(GammaN)+oEnd);
 	     TargetP = std::vector<int>(gBestGammaP);
 	     TargetN = std::vector<int>(gBestGammaN);
-	     offset = cSwapLocal;
 	     // calculate swap for global
-	     for (auto i = 0; i < cSwapGlobal; ++i) {
+	     for (auto i = 0; i < numModules; ++i) {
 	       int j = std::find(std::begin(SourceP)+i, std::end(SourceP), TargetP[i]) - std::begin(SourceP);
-	       sAP[oBegin+offset+i] = i;
-	       sBP[oBegin+offset+i] = j;
 	       int temp = SourceP[i];
 	       SourceP[i] = SourceP[j];
 	       SourceP[j] = temp;
+	       if (dis(gen) < cSwap) { // swap gamma
+		 temp = GammaP[i+oBegin];
+		 GammaP[i+oBegin] = GammaP[j+oBegin];
+		 GammaP[j+oBegin] = temp;
+		 ++swapCount;
+	       }
 	       j = std::find(std::begin(SourceN)+i, std::end(SourceN), TargetN[i]) - std::begin(SourceN);
-	       sAN[oBegin+offset+i] = i;
-	       sBN[oBegin+offset+i] = j;
 	       temp = SourceN[i];
 	       SourceN[i] = SourceN[j];
 	       SourceN[j] = temp;
+	       if (dis(gen) < cSwap) { // swap gamma
+		 temp = GammaN[i+oBegin];
+		 GammaN[i+oBegin] = GammaN[j+oBegin];
+		 GammaN[j+oBegin] = temp;
+		 ++swapCount;
+	       }
 	     }
-  
-	     // swap Gamma PN
-	     for (auto i = 0; i < numModules; ++i) {
-	       int temp = GammaP[oBegin + sAP[oBegin+i]];
-	       GammaP[oBegin + sAP[oBegin+i]] = GammaP[oBegin + sBP[oBegin+i]];
-	       GammaP[oBegin + sBP[oBegin+i]] = temp;
-	       temp = GammaN[oBegin + sAN[oBegin+i]];
-	       GammaN[oBegin + sAN[oBegin+i]] = GammaN[oBegin + sBN[oBegin+i]];
-	       GammaN[oBegin + sBN[oBegin+i]] = temp;
+	     
+	     // introduce random parameter
+	     std::uniform_int_distribution<> dis2(0, numModules-1);
+	     std::uniform_int_distribution<> dis3(0, 2);
+	     for (auto i=0; i<cSwapRandom; ++i) {
+	       int j = dis2(gen), k = dis2(gen);
+	       int type = dis3(gen); // 0: swap P, 1: swap N, 2: swap both
+	       int temp = 0;
+	       if (type != 1) {
+		 temp = GammaP[k+oBegin];
+		 GammaP[k+oBegin] = GammaP[j+oBegin];
+		 GammaP[j+oBegin] = temp;
+		 ++swapCount;
+	       }
+	       if (type != 0) {
+		 temp = GammaN[k+oBegin];
+		 GammaN[k+oBegin] = GammaN[j+oBegin];
+		 GammaN[j+oBegin] = temp;
+		 ++swapCount;
+	       }
 	     }
 
 	     // construct HCG and VCG
@@ -248,6 +270,7 @@ int main(int argc, const char *argv[])
 	       OrderN.at(GammaN.at(i+oBegin)) = i;
 	     }
 
+	     
 	     // note: in cuda HCG and VCG must be preallocated
 	     for (auto i = 0; i < numModules; ++i) {
 	       for (auto j = 0; j < numModules; ++j) {
@@ -291,8 +314,10 @@ int main(int argc, const char *argv[])
     // update global best
     minParIdx = std::distance(std::begin(lastArea),
 				  std::min_element(std::begin(lastArea), std::end(lastArea)));
-    std::cout << "\t" << lastArea[minParIdx] << std::endl;
+    std::cout << lastArea << std::endl;
+    ++counter;
     if (gBestArea > lastArea[minParIdx]) {
+      counter = 0;
       gBestArea = lastArea[minParIdx];
       minOffBegin = minParIdx*numModules;
       minOffEnd = (minParIdx+1)*numModules;
@@ -310,12 +335,12 @@ int main(int argc, const char *argv[])
 	      << gBestGammaN << std::endl;
     */
     std::cout << gBestArea << std::endl;
-    ++counter;
+    ++cycle;
   }
   
 
   
-  std::cout << "Best Area:" << gBestArea << std::endl;
+  std::cout << "Best Area:" << gBestArea  << "\tUsing "<< cycle << " Cycles"<< std::endl;
   // Timing
   auto stop = Time::now();
   fsec fs = stop - start;
