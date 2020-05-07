@@ -15,6 +15,8 @@
 
 #include "util.hpp"
 
+#define NDEBUG
+
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
@@ -25,11 +27,11 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
    }
 }
 
-__constant__ int dSizes[1024];
+__constant__ int dSizes[1024]; // constant memory storing the dimensions
 
 constexpr int numParticles = 32;
 
-constexpr float cSwap = 0.6f;
+constexpr float cSwap = 0.6f; // probability
 
 // deleter functor
 template <typename T>
@@ -40,6 +42,7 @@ struct cuda_deleter {
   }
 };
 
+
 __host__ __device__
 int paddingTo32(int num) {
   return (num+31)/32*32;
@@ -48,7 +51,7 @@ int paddingTo32(int num) {
 template <typename T>
 using cuda_unique_ptr = std::unique_ptr<T, decltype(cuda_deleter<T>())>;
 
-
+// build graph in the memory according to the position relationship
 __device__
 void buildGraph(int& tIdx,
 		int* HCG,
@@ -81,12 +84,13 @@ void buildGraph(int& tIdx,
   }
 }
 
+// topological visit graph, see report for detailed algorithm
 // Note: Expect Qstart and Qend be 0
 __device__
 void topovisit(int& tIdx,
 	       int& pIdx,
 	       int* Graph,
-	       int& Income,
+	       int& Income, // count of income edge to vertex tIdx
 	       bool& isAddedToQueue,
 	       int* sCoord, // __shared__
 	       int* Queue, // __shared__
@@ -104,7 +108,8 @@ void topovisit(int& tIdx,
   Queue[tIdx] = -1;
   int idxQ = -1;
   __syncthreads();
-  if ((Income == 0) && (!isAddedToQueue)) {
+  // if there is no incoming edge and it is not added to queue do that
+  if ((Income == 0) && (!isAddedToQueue)) { 
     idxQ = atomicAdd(pQend, 1); // get an index in Q
     Queue[idxQ] = tIdx;
     isAddedToQueue = true;
@@ -115,7 +120,7 @@ void topovisit(int& tIdx,
   __syncthreads();
   while (Qstart < Qend) { // there is element in Queue
     int currVertex = Queue[Qstart]; // a vertex with no incoming edge from edge not visited
-    
+#ifndef NDEBUG
     if (currVertex == -1) {
       atomicAdd(pQstart, 1);
       //printf("Q %d %d %d\n",pIdx, Qstart, Qend);
@@ -138,13 +143,16 @@ void topovisit(int& tIdx,
       __syncthreads();
       asm("trap;");
     }
-    
+#endif
     ++Qstart;
     __syncthreads();
+
+    // set outgoing edge as visited by subtracting the count to income[tIdx]
     int idx = numModules*paddingTo32(numModules)*(blockIdx.x)
       + currVertex*paddingTo32(numModules) + tIdx; // edge currVertex -> tIdx
     if (Graph[idx] == 1) 
       Income -= 1;
+    
     // get longest past from all predecents of currVertex
     path[tIdx] = 0;
     __syncthreads();
@@ -222,11 +230,12 @@ void initialization(int* lBestGammaP,
   sOrderN[tIdx] = -1;
   sGammaP[tIdx] = tIdx;
   sGammaN[tIdx] = tIdx;
-  
+
+  // random swap variables to initialize
   int stride = 1 << int(ceilf(log2f((float)numModules))-1);
   
   __syncthreads();
-  for (; stride >=1; stride >>=1) {
+  for (; stride >=1; stride >>=1) { //
     if ((!((tIdx / stride) & 1)) && (tIdx+stride < numModules)) {// if it is a valid swap
       if (curand(&states[tIdx+offset]) & 1) {
 	int temp = sGammaP[tIdx];
@@ -300,7 +309,7 @@ void initialization(int* lBestGammaP,
   
   if (tIdx == 0) {
     if (Qend != numModules)
-      printf("Unexpected end at %d", Qend);
+      printf("Unexpected end at %d\n", Qend);
   }
   
   __syncthreads();
@@ -317,7 +326,7 @@ void initialization(int* lBestGammaP,
   }
 }
 
-
+// function used to perform random swap to gamma sequence
 __device__
 void swapSequence(int& tIdx,
 		  int sourceOffset,
@@ -528,11 +537,6 @@ void update(int* GammaP,
     
     if (Qend != numModules) {
       printf("1Unexpected end at %d, %d\n", Qend, Qstart);
-      for (int i = 0; i < numModules; ++i) {
-	printf("%d ", queue[i]);
-      }
-      printf("\n");
-      asm("trap;");
     }
     Qstart = 0;
     Qend = 0;
@@ -556,7 +560,6 @@ void update(int* GammaP,
   if (tIdx == 0) {
     if (Qend != numModules) {
       printf("2Unexpected end at %d, %d\n", Qend, Qstart);
-      asm("trap;");
     }
   }
   
