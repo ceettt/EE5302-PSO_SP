@@ -46,17 +46,14 @@ int main(int argc, const char *argv[])
       exit(1);
     }
     read_ckt(ckt_file, numModules, widths, heights);
-    /*
-    for (auto i = 0; i < numModules; ++i) {
-      std::cout << "Idx:" << i << "\twidth:" << widths.at(i)
-		<< "\theight:" << heights.at(i) << std::endl; 
-		}*/
     ckt_file.close();
   } catch (const std::out_of_range& e) {
     std::cerr << "Not enough parameters." << std::endl;
     printUsage(args.at(0));
     exit(1);
   }
+  std::ofstream result_file("result.txt");
+    
   // particle global variables
   std::vector<int> gBestGammaP(numModules), gBestGammaN(numModules);
   std::vector<int> lBestGammaP(numParticles*numModules), lBestGammaN(numParticles*numModules);
@@ -347,6 +344,6 @@ int main(int argc, const char *argv[])
   us d = std::chrono::duration_cast<us>(fs);
   std::cout << "Program took \t" << fs.count() << "s" << std::endl
 	    << "\tor \t" << d.count() << "us" << std::endl;
-
+  write_ckt(result_file, gBestArea, numModules, gBestGammaP, gBestGammaN, gBestWidC, gBestHeiC);
   return 0;
 }

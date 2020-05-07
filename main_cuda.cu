@@ -642,7 +642,7 @@ int main(int argc, const char *argv[])
     };
   cudaSetDevice(0);
   cudaFree(0);
-
+  std::ofstream result_file("result.txt");
   auto start = Time::now();
   // global scope
   cuda_unique_ptr<int> gBestGammaP((int*)myCudaMallocManaged(numModules*sizeof(int)));
@@ -766,7 +766,15 @@ int main(int argc, const char *argv[])
   std::cout << "Program took \t" << fs.count() << "s" << std::endl
 	    << "\tor \t" << d.count() << "us" << std::endl;
   // Note: TURN OFF UNIFIED MEMORY PROFILE
-  //cudaProfilerStop();
+  std::vector<int>
+    gBestGammaP_h(numModules),
+    gBestGammaN_h(numModules),
+    gBestWidC_h(numModules),
+    gBestHeiC_h(numModules);
+  std::copy(gBestGammaP.get(), gBestGammaP.get()+numModules, std::begin(gBestGammaP_h));
+  std::copy(gBestGammaN.get(), gBestGammaN.get()+numModules, std::begin(gBestGammaN_h));
+  std::copy(gBestWidC.get(), gBestWidC.get()+numModules, std::begin(gBestWidC_h));
+  std::copy(gBestHeiC.get(), gBestHeiC.get()+numModules, std::begin(gBestHeiC_h));
+  write_ckt(result_file, gBestArea, numModules, gBestGammaP_h, gBestGammaN_h, gBestWidC_h, gBestHeiC_h);
   return 0;
-
 }

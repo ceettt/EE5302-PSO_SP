@@ -4,11 +4,24 @@
 #include <sstream>
 #include <vector>
 #include <cassert>
+#include <iterator>
 
 #include "main.hpp"
 void printUsage(std::string& progname)
 {
   std::cerr << "Usage: "<< progname <<" [TEST FILE]" << std::endl; 
+}
+
+template <typename T>
+std::ostream& operator<< (std::ostream& out, const std::vector<T>& v) {
+  if ( !v.empty() ) {
+    out << '[';
+    std::copy (v.begin(), v.end(), std::ostream_iterator<T>(out, ", "));
+    out.seekp(-1, std::ios_base::cur);
+    out.seekp(-1, std::ios_base::cur);
+    out << "] ";
+  }
+  return out;
 }
 
 // note: only do area optimization, ignore nets for now
@@ -50,4 +63,25 @@ int visit(const int i,
   coord[i+offset] = longestPath;
   flag.at(i) = Perm;
   return longestPath;
+}
+
+void write_ckt(std::ofstream& outFile,
+	       int area,
+	       int numModules,
+	       std::vector<int>& GammaP,
+	       std::vector<int>& GammaN,
+	       std::vector<int>& widC,
+	       std::vector<int>& heiC)
+{
+  outFile << "Best Area:" << area << std::endl;
+  outFile << "Given by following Sequence Pair" << std::endl;
+  outFile << "Positive Sequence:" << GammaP << std::endl;
+  outFile << "Negative Sequence:" << GammaN << std::endl;
+  outFile << "Following is the resulting coordinate" << std::endl; 
+  outFile << "label\t\tX\t\tY" << std::endl;
+  for (auto i=0; i < numModules; ++i) {
+    outFile << i << "\t\t"
+	    << widC.at(i) << "\t\t"
+	    << heiC.at(i) << std::endl;
+  }
 }

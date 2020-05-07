@@ -15,4 +15,13 @@ int visit(const int i,
 	  std::vector<int>& coord,
 	  std::vector<Status>& flag);
 
+void write_ckt(std::ofstream& outFile,
+	       int area,
+	       int numModules,
+	       std::vector<int>& GammaP,
+	       std::vector<int>& GammaN,
+	       std::vector<int>& widC,
+	       std::vector<int>& heiC);
+
+
 #endif
