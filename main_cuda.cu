@@ -169,7 +169,10 @@ void topovisit(int& tIdx,
 	path[tIdx] = max(path[tIdx], path[tIdx+i]);
       __syncthreads();
     }
-    
+    // fix odd problem that last cycle is not performed
+    if (tIdx == 0) 
+      path[0] = max(path[0], path[1]);
+      __syncthreads();
     // update Queue
     if ((Income == 0) && (!isAddedToQueue)) {
       int idxQ = atomicAdd(pQend, 1); // get an index in Q
