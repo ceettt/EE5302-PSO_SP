@@ -6,9 +6,9 @@ Hanzhao Yu (yuxx0839), Tonglin Chen (chen5202)
 
 ## Branches
 
- - master: velocity based on random applying swap operators
- - oldvel: velocity based on truncation of swap operators, no cuda implementation
- - vel1: velocity in continuous space
+ - master: velocity based on random applying swap operators, type 3 in report
+ - oldvel: velocity based on truncation of swap operators, no cuda implementation, type 1 in report
+ - vel1: velocity in continuous space, type 2 in report
 
 ## Compiling options
 
